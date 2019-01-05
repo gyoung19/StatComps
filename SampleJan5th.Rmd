@@ -1,0 +1,153 @@
+---
+title: "Sample of Working with Spectrogram Voice Data"
+output: pdf_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+
+```{r, include=FALSE}
+library(mosaic)
+library(dplyr)
+library(randomForest)
+library(glmnet)
+```
+
+
+The following is an example of a classification forest model built upon measurements from spectrogram data. The work is done on the dataset voice.csv compiled by Cory Becker and available on Kaggle. This dataset was created using functions from the libraries seewave and tuneR in R's Cran repository to create and analysze spectrograms from a set of voice recordings. Each entry (row) in the data is a voice recording and each variable (column) is a measurement taken off of the spectrogram (excepting the variable "label" which is the biological sex of the entry, reported directly from Becker's data). This dataset was compiled with the express intention of predicting biological sex. My intent, however, is to construct a model that groups entries by the individual who speaks them. It is not wholly unrelated, previous work has shown biological sex to be one of the foremost predicatble features of a voice and integral to voice recognition. I am working on scraping my own data from the VoxForge database which is more suited to my purposes (it contains multiple voice entries from specific individuals). I am using this dataset here with the intention of providing an example of what spectrogram data looks like and how it can be incorporated into a predictive model vis a vis the request in the feedback to my first project proposal. 
+
+
+A spectrogram plots the frequency of a sound wave over time, usually with amplitude represented as a color axis. Here is an example of a spectrogram for one of the audio files I am working with for the full project.
+
+
+![Spectrogram](/home/class19/gyoung19/Stat495/Aaron1Spec.pdf)
+
+\newpage
+The majority of variables in this dataset are ordinary summary statistics of the frequency distributions in Becker's spectrograms but there are a few that are more uniquely suited to analyzing voice data. Fundamental frequency, spectral entropy, and spectral flatness in particular tend to be better measures of human vocal characteristics. Other, similarly appropriate variables, that I hope to make use of that are not present here include number of harmonics and amplitudes of the waves.
+
+
+**The variables in the voice dataset are defined as follows:**
+
+
+meanfreq: mean frequency of the wave(in kHz)
+
+
+sd: standard deviation of frequency of the wave
+
+
+median: median frequency (in kHz)
+
+
+Q25: first quantile for frequency (in kHz)
+
+
+Q75: third quantile for frequency (in kHz)
+
+
+IQR: interquantile range for frequency (in kHz)
+
+
+skew: skewness of the spectrogram's frequency, computed as $S = \sum_{i=1}^N(freq_i-meanfreq)^3 \times \frac{1}{sd^3}$. S<0 indicates left skew, S>0 indicates right skew, S=0 indicates perfect symmetry
+
+
+kurt: kurtosis of the spectrogram's frequency, computed according to $K= \sum_{i=1}^N(freq_i-meanfreq)^4 \times \frac{1}{sd^4}$, measures the spectrogram relative to the normal curve. K<3 indicates fewer items at center and tails than expected from normal but more in the shoulders, K>3 indicates more items at the center and tails than expected but fewer at the shoulders, and K=3 indicates a perfect normal curve. 
+
+
+sp.ent: spectral entropy. Describes the complexity of a sound wave, ie how much information is being conveyed. A pure synthetic tone has low entropy, a recording from a crowded diner has high entropy. Roughly speaking it indicates how "noise-like" a sound is compared to how "tonelike". Ranges between 0 and 1. 
+
+
+sfm: spectral flatness. White noise produces a spectrogram that looks nearly flat, with only minor rising and falling around its central tone. This measure indicates how steady and near to white noise a spectrogram is. Sfm closer to 1.0 indicates a very monotonic sound and human voices typically score much closer to 0.0. 
+
+
+mode: mode frequency
+
+
+centroid: frequency centroid. Computed as $C= \sum_{i=1}^N(freq_i-meanfreq)^2 \times  \frac{1}{sd^2}$
+
+
+peakf: peak frequency (frequency with highest energy)
+
+
+meanfun: average of fundamental frequency measured across acoustic signal. Fundamental frequency is the lowest frequency produced by oscillation of the object. In terms of hearing, it is the lowest pitch or tone that you hear with harmonics rising above it where the the frequency of the sound waves exactly double that frequency. The mean fundamental frequency thus gives an approximation of a person's most comfortable "natural" pitch, though it can be forced higher or lower by modulation of the voice. 
+
+
+minfun: minimum fundamental frequency measured across acoustic signal
+
+
+maxfun: maximum fundamental frequency measured across acoustic signal
+
+
+meandom: average of dominant frequency measured across acoustic signal. Dominant frequencies are local maximums of the frequencies, the apexes in the wave.
+
+
+mindom: minimum of dominant frequency measured across acoustic signal
+
+
+maxdom: maximum of dominant frequency measured across acoustic signal
+
+
+dfrange: range of dominant frequency measured across acoustic signal
+
+
+modindx: modulation index. Calculated as the accumulated absolute difference between adjacent measurements of fundamental frequencies divided by the frequency range.
+
+
+label: male or female
+
+\newpage
+
+**Sample Regression Tree**
+
+
+Split the data into training and testing sets. 
+
+
+```{r}
+set.seed(36) #for reproducability
+
+train <- voice %>%
+  sample_frac(0.80) %>% 
+  mutate(label = as.factor(label))
+
+test <- voice %>%
+  setdiff(train) %>% 
+  mutate(label = as.factor(label))
+
+x_train <- model.matrix(label ~ ., train)[, -1]
+x_test <- model.matrix(label ~ ., test)[, -1]
+
+y_train <- train %>%
+  dplyr::select(label)
+
+y_test <- test %>%
+  dplyr::select(label)
+```
+
+
+Create random forest on training set, using default params of 500 trees considering 4 variables at each step with no maximum tree length. 
+
+
+```{r}
+set.seed(2250) #reproducability
+rf <- randomForest(label ~ . , data = train, importance = TRUE) #produce random forest model
+rf
+```
+
+```{r}
+estimate1 <- predict(rf, newdata = test) #assess accuracy of model on "new" data
+misclass1 <- ifelse(estimate1 != test$label,1,0) #create vector indicating where misclassifications occurred
+mean(misclass1) #get percentage of misclassifications on test set
+```
+
+
+Our model seems to be able to differentiate between the biological sex of the speakers with a high degree of accuracy, misclassifying only 1.26% of the time. We would also like to check which of these many variables were most informative to our model. 
+
+
+```{r}
+importance(rf) #list variables and importance
+```
+
+
+It seems that the mean fundamental frequency leads by quite a large margin and probably merits further consideration in my continuing work. This is not at all unexpected, fundamental frequency has been useful in differentiating biological sex of a speaker before. Reports on the actual numbers vary, but generally state that the average range of male fundamental frequency is somewhere between 85 to 180 Hz and the average female range is between 165 and 255 Hz. 
